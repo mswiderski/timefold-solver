@@ -10,5 +10,10 @@ public enum OnStartCommand {
     VALIDATE_COMPUTE_SOLVE,
     SOLVE, // expects the dataset to be already validated and computed
     VALIDATE_COMPUTE,
-    IDLE
+    IDLE,
+    /**
+     * The pod waits in a pod pool and runs nothing until a claim.
+     * The claim supplies the environment of the job, which includes the start command to run.
+     */
+    POOLED
 }

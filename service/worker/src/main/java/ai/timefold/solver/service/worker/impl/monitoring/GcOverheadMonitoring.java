@@ -19,6 +19,8 @@ import jakarta.inject.Inject;
 import ai.timefold.solver.service.definition.internal.error.ErrorCodes;
 import ai.timefold.solver.service.definition.internal.error.TimefoldRuntimeException;
 import ai.timefold.solver.service.definition.internal.platform.EnvironmentVars;
+import ai.timefold.solver.service.definition.internal.platform.PlatformEnvironment;
+import ai.timefold.solver.service.definition.internal.platform.PodPoolClaimed;
 import ai.timefold.solver.service.worker.impl.SolverWorker;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -86,9 +88,17 @@ public class GcOverheadMonitoring {
     }
 
     public void onStart(@Observes StartupEvent event) {
-        String id = System.getenv(EnvironmentVars.ENV_TIMEFOLD_JOB_ID);
+        start();
+    }
 
-        if (System.getenv(EnvironmentVars.ENV_TIMEFOLD_JOB_ID) != null) {
+    public void onPodPoolClaimed(@Observes PodPoolClaimed event) {
+        start();
+    }
+
+    private void start() {
+        String id = PlatformEnvironment.getOrNull(EnvironmentVars.ENV_TIMEFOLD_JOB_ID);
+
+        if (id != null) {
 
             executor.scheduleAtFixedRate(() -> {
 

@@ -7,13 +7,18 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.event.Reception;
 import jakarta.inject.Inject;
 
 import ai.timefold.solver.service.definition.api.enrichment.SolverModelEnricher;
 import ai.timefold.solver.service.definition.impl.enrichment.MapEnrichmentContext;
 import ai.timefold.solver.service.definition.internal.error.ErrorCodes;
 import ai.timefold.solver.service.definition.internal.error.TimefoldRuntimeException;
+import ai.timefold.solver.service.definition.internal.platform.PlatformEnvironment;
+import ai.timefold.solver.service.definition.internal.platform.PodPoolClaimed;
 import ai.timefold.solver.service.maps.api.DistanceMatrix;
 import ai.timefold.solver.service.maps.api.model.Location;
 import ai.timefold.solver.service.maps.api.model.TransportType;
@@ -38,7 +43,7 @@ public class TravelTimeMatrixEnricher implements SolverModelEnricher<LocationsAw
 
     private final MapServiceOptionsSupplier optionsSupplier;
 
-    private final boolean useTraffic;
+    private volatile boolean useTraffic;
 
     private final MapEnrichmentContext mapEnrichmentContext;
 
@@ -50,6 +55,12 @@ public class TravelTimeMatrixEnricher implements SolverModelEnricher<LocationsAw
         this.optionsSupplier = optionsSupplier;
         this.mapEnrichmentContext = mapEnrichmentContext;
         this.useTraffic = useTraffic;
+    }
+
+    void onPodPoolClaimed(
+            @Observes(notifyObserver = Reception.IF_EXISTS) @Priority(PodPoolClaimed.REFRESH_PRIORITY) PodPoolClaimed event) {
+        this.useTraffic = PlatformEnvironment.get(MapServiceOptionsSupplier.USE_TRAFFIC_PROPERTY, Boolean.class)
+                .orElse(false);
     }
 
     @Retry(maxRetries = 5, delay = 1, delayUnit = ChronoUnit.SECONDS, abortOn = {

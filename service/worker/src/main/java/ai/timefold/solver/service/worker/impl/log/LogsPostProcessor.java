@@ -20,6 +20,7 @@ import ai.timefold.solver.service.definition.api.SolverModel;
 import ai.timefold.solver.service.definition.api.log.LogInfo;
 import ai.timefold.solver.service.definition.impl.log.LoggingConstants;
 import ai.timefold.solver.service.definition.internal.platform.EnvironmentVars;
+import ai.timefold.solver.service.definition.internal.platform.PlatformEnvironment;
 import ai.timefold.solver.service.definition.internal.storage.AbstractStorageService;
 
 import org.slf4j.Logger;
@@ -75,7 +76,7 @@ public class LogsPostProcessor implements ModelPostProcessor {
         }
         logsStored.set(true);
 
-        String id = System.getenv(EnvironmentVars.ENV_TIMEFOLD_JOB_ID);
+        String id = PlatformEnvironment.getOrNull(EnvironmentVars.ENV_TIMEFOLD_JOB_ID);
         if (id != null) {
             try {
                 storeLogsWithStacktrace(id, null);

@@ -23,6 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 
 import jakarta.inject.Inject;
@@ -61,7 +62,8 @@ public class MapServiceClientImpl implements MapService {
     private final MapServiceClient mapService;
     private final List<TravelTimeAndDistanceConverter> converters;
     private final Boolean fallbackEnabled;
-    private final boolean useTraffic;
+    // A supplier, because a pod pool claim can set the value after the client is created.
+    private final BooleanSupplier useTraffic;
     private final Timeframe defaultTimeframe;
     private final MapServiceLocalHaversineImpl fallbackService;
     private final SingleItemCache<CacheItem> travelTimeAndDistanceSingleItemCache;
@@ -78,6 +80,20 @@ public class MapServiceClientImpl implements MapService {
             @ConfigProperty(name = "timefold.platform.map-service.use-traffic", defaultValue = "false") Boolean useTraffic,
             @ConfigProperty(
                     name = "timefold.platform.map-service.default-timeframe") Optional<String> defaultTimeframeOverride,
+            HaversineTravelTimeAndDistanceMatrixProvider travelTimeAndDistanceMatrixProvider,
+            HaversineWaypointsProvider haversineWaypointsProvider,
+            TimeframeBucketing timeframeBucketing,
+            ManagedExecutor managedExecutor,
+            ObjectMapper mapper) {
+        this(mapService, converters, fallbackEnabled, () -> useTraffic, defaultTimeframeOverride,
+                travelTimeAndDistanceMatrixProvider, haversineWaypointsProvider, timeframeBucketing, managedExecutor, mapper);
+    }
+
+    public MapServiceClientImpl(MapServiceClient mapService,
+            List<TravelTimeAndDistanceConverter> converters,
+            Boolean fallbackEnabled,
+            BooleanSupplier useTraffic,
+            Optional<String> defaultTimeframeOverride,
             HaversineTravelTimeAndDistanceMatrixProvider travelTimeAndDistanceMatrixProvider,
             HaversineWaypointsProvider haversineWaypointsProvider,
             TimeframeBucketing timeframeBucketing,
@@ -124,7 +140,7 @@ public class MapServiceClientImpl implements MapService {
         // Traffic-without-pruning path: when traffic is enabled platform-wide but the caller didn't pick a timeframe,
         // append the bucketing's default so the maps service returns a single traffic-aware matrix instead of plain
         // (timeframe-independent) data. The model keeps using location.getTravelTimeTo(other).
-        if (useTraffic && !optionsMap.containsKey(MapServiceOptions.TIMEFRAME)) {
+        if (useTraffic.getAsBoolean() && !optionsMap.containsKey(MapServiceOptions.TIMEFRAME)) {
             options = MapServiceOptions.withOption(options, MapServiceOptions.TIMEFRAME, defaultTimeframe.name());
         }
 
@@ -208,7 +224,7 @@ public class MapServiceClientImpl implements MapService {
             return timeframedMatricesCache.get();
         }
 
-        if (!useTraffic) {
+        if (!useTraffic.getAsBoolean()) {
             LOGGER.info("Traffic disabled by platform configuration; using a single non-traffic matrix");
             TravelTimeAndDistanceWithMetadata plain = getTravelTimeAndDistance(locations, options);
             Set<Location> notInMapSet = new HashSet<>();

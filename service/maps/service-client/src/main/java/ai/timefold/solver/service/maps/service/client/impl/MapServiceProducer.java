@@ -30,7 +30,7 @@ public class MapServiceProducer {
     private final MapServiceClient mapService;
     private final List<TravelTimeAndDistanceConverter> converters;
     private final Boolean fallbackEnabled;
-    private final Boolean useTraffic;
+    private final MapServiceOptionsSupplier optionsSupplier;
     private final Optional<String> defaultTimeframeOverride;
     private final TimeframeBucketing timeframeBucketing;
     private final ManagedExecutor managedExecutor;
@@ -45,7 +45,7 @@ public class MapServiceProducer {
             @All List<TravelTimeAndDistanceConverter> converters,
             @ConfigProperty(name = "timefold.platform.map-service.enable-fallback",
                     defaultValue = "false") Boolean fallbackEnabled,
-            @ConfigProperty(name = "timefold.platform.map-service.use-traffic", defaultValue = "false") Boolean useTraffic,
+            MapServiceOptionsSupplier optionsSupplier,
             @ConfigProperty(
                     name = "timefold.platform.map-service.default-timeframe") Optional<String> defaultTimeframeOverride,
             TimeframeBucketing timeframeBucketing,
@@ -57,7 +57,7 @@ public class MapServiceProducer {
         this.mapService = mapService;
         this.converters = converters;
         this.fallbackEnabled = fallbackEnabled;
-        this.useTraffic = useTraffic;
+        this.optionsSupplier = optionsSupplier;
         this.defaultTimeframeOverride = defaultTimeframeOverride;
         this.timeframeBucketing = timeframeBucketing;
         this.managedExecutor = managedExecutor;
@@ -67,7 +67,8 @@ public class MapServiceProducer {
     @Produces
     public MapService mapServiceProducer() {
         if (useRemote) {
-            return new MapServiceClientImpl(mapService, converters, fallbackEnabled, useTraffic, defaultTimeframeOverride,
+            return new MapServiceClientImpl(mapService, converters, fallbackEnabled, optionsSupplier::isUseTraffic,
+                    defaultTimeframeOverride,
                     travelTimeAndDistanceProvider, waypointsProvider, timeframeBucketing, managedExecutor, mapper);
         }
         return new MapServiceLocalHaversineImpl(travelTimeAndDistanceProvider, waypointsProvider);
