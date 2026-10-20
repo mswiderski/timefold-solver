@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.Optional;
 
+import ai.timefold.solver.service.definition.internal.platform.PodPoolClaimed;
 import ai.timefold.solver.service.maps.api.model.TransportType;
 
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,27 @@ class MapServiceOptionsSupplierTest {
         assertThat(supplier.options().build()).doesNotContain("my-set");
         assertThat(supplier.options().locationSetName("my-set").build()).contains("my-set");
         assertThat(supplier.options().locationSetName("my-set").locationSetName(null).build()).doesNotContain("my-set");
+    }
+
+    @Test
+    void podPoolClaimReadsTheOptionsAgain() {
+        var supplier = supplier(null, null);
+        assertThat(supplier.getOptions()).doesNotContain("tenant-1");
+        assertThat(supplier.isUseTraffic()).isFalse();
+
+        System.setProperty(MapServiceOptionsSupplier.TENANT_ID_PROPERTY, "tenant-1");
+        System.setProperty(MapServiceOptionsSupplier.TRANSPORT_TYPE_PROPERTY, "bicycle");
+        System.setProperty(MapServiceOptionsSupplier.USE_TRAFFIC_PROPERTY, "true");
+        try {
+            supplier.onPodPoolClaimed(new PodPoolClaimed());
+        } finally {
+            System.clearProperty(MapServiceOptionsSupplier.TENANT_ID_PROPERTY);
+            System.clearProperty(MapServiceOptionsSupplier.TRANSPORT_TYPE_PROPERTY);
+            System.clearProperty(MapServiceOptionsSupplier.USE_TRAFFIC_PROPERTY);
+        }
+
+        assertThat(supplier.getOptions()).contains("tenantId:tenant-1").contains("bicycle");
+        assertThat(supplier.isUseTraffic()).isTrue();
     }
 
     private static MapServiceOptionsSupplier supplier(String transportType, String allowedTransportTypes) {

@@ -3,6 +3,7 @@ package ai.timefold.solver.service.worker.impl;
 import static ai.timefold.solver.service.definition.internal.error.ErrorCodes.SOLVER_UNKNOWN;
 import static ai.timefold.solver.service.definition.internal.platform.EnvironmentVars.ENV_TIMEFOLD_PLAN_NAME;
 import static ai.timefold.solver.service.definition.internal.platform.EnvironmentVars.ENV_TIMEFOLD_TENANT_NAME;
+import static ai.timefold.solver.service.definition.internal.platform.PlatformEnvironment.getOrNull;
 
 import java.time.Duration;
 import java.util.List;
@@ -75,6 +76,7 @@ import ai.timefold.solver.service.definition.internal.events.SolverChannels;
 import ai.timefold.solver.service.definition.internal.events.ValidationSummary;
 import ai.timefold.solver.service.definition.internal.platform.EnvironmentVars;
 import ai.timefold.solver.service.definition.internal.platform.OnStartCommand;
+import ai.timefold.solver.service.definition.internal.platform.PodPoolClaimed;
 import ai.timefold.solver.service.definition.internal.solver.BestSolutionConsumerDecorator;
 import ai.timefold.solver.service.definition.internal.storage.AbstractStorageService;
 import ai.timefold.solver.service.worker.impl.termination.TerminationService;
@@ -162,10 +164,6 @@ public class SolverWorker {
 
     private final ConcurrentMap<Object, CompletableFuture<SolverJob<SolverModel>>> solverJobs = new ConcurrentHashMap<>();
 
-    private final String planName;
-
-    private final String tenantName;
-
     private BestSolutionConsumerDecorator bestSolutionConsumerDecorator;
 
     private AtomicBoolean shuttingDown = new AtomicBoolean(false);
@@ -232,8 +230,16 @@ public class SolverWorker {
         this.bestSolutionEmitter = bestSolutionEmitter;
         this.finalSolutionEmitter = finalSolutionEmitter;
         this.failedSolutionEmitter = failedSolutionEmitter;
-        this.planName = System.getenv(ENV_TIMEFOLD_PLAN_NAME);
-        this.tenantName = System.getenv(ENV_TIMEFOLD_TENANT_NAME);
+    }
+
+    // Read at the time of use, because a pod pool claim can set the value after startup.
+    private static @Nullable String planName() {
+        return getOrNull(ENV_TIMEFOLD_PLAN_NAME);
+    }
+
+    // Read at the time of use, because a pod pool claim can set the value after startup.
+    private static @Nullable String tenantName() {
+        return getOrNull(ENV_TIMEFOLD_TENANT_NAME);
     }
 
     private void reportExecutionEnvironmentInfo() {
@@ -275,8 +281,21 @@ public class SolverWorker {
      */
     public void onStart(@Observes StartupEvent event) {
         reportExecutionEnvironmentInfo();
-        var id = System.getenv(EnvironmentVars.ENV_TIMEFOLD_JOB_ID);
-        var onStartCommandEnv = System.getenv(EnvironmentVars.ENV_TIMEFOLD_ON_START_COMMAND);
+        start();
+    }
+
+    /**
+     * Starts the work for a claimed job, with the environment that the pod pool claim applied.
+     *
+     * @param event the claim event
+     */
+    public void onPodPoolClaimed(@Observes PodPoolClaimed event) {
+        start();
+    }
+
+    private void start() {
+        var id = getOrNull(EnvironmentVars.ENV_TIMEFOLD_JOB_ID);
+        var onStartCommandEnv = getOrNull(EnvironmentVars.ENV_TIMEFOLD_ON_START_COMMAND);
         if (id == null && onStartCommandEnv == null) {
             LOGGER.atDebug().log("No environment variables specified; assuming the solver worked is running locally.");
             return;
@@ -292,6 +311,12 @@ public class SolverWorker {
         }
 
         var onStartCommand = OnStartCommand.valueOf(onStartCommandEnv);
+
+        if (onStartCommand == OnStartCommand.POOLED) {
+            // No shutdown is scheduled; the pod waits in the pod pool until a claim.
+            LOGGER.info("Solver worker is in a pod pool, waiting for a claim.");
+            return;
+        }
 
         if (onStartCommand == OnStartCommand.IDLE) {
             startIdle();
@@ -342,7 +367,7 @@ public class SolverWorker {
      */
     private void startIdle() {
         var shutdownDelay = Duration.ofMinutes(10);
-        var delayDurationEnv = System.getenv(EnvironmentVars.ENV_TIMEFOLD_IDLE_RUNTIME_TTL);
+        var delayDurationEnv = getOrNull(EnvironmentVars.ENV_TIMEFOLD_IDLE_RUNTIME_TTL);
         if (delayDurationEnv != null) {
             shutdownDelay = Duration.parse(delayDurationEnv);
         }
@@ -364,6 +389,12 @@ public class SolverWorker {
 
             var solverModel = createSolverModel(modelInput, modelConfig);
 
+            String configuredLocation = getOrNull(EnvironmentVars.ENV_TIMEFOLD_PLATFORM_MAP_SERVICE_LOCATION);
+            if (EnvironmentVars.MAP_SERVICE_LOCATION_AUTO_SELECT.equalsIgnoreCase(configuredLocation)) {
+                LOGGER.info("Auto-select map resolved to '{}' for dataset {}.", mapEnrichmentContext.getResolvedMapLocation(),
+                        metadata.getId());
+            }
+
             solutionManager.update(solverModel);
 
             // Store the updated solution
@@ -375,7 +406,7 @@ public class SolverWorker {
             postProcessOutput(id, modelOutput, solverModel);
 
             sendEvent(datasetOutputsComputedEmitter,
-                    new DatasetComputedEvent(metadata, solverModel, planName, tenantName, solveRequested,
+                    new DatasetComputedEvent(metadata, solverModel, planName(), tenantName(), solveRequested,
                             mapEnrichmentContext.getResolvedMapLocation(), configuredCores(configuration),
                             configuredMemory(configuration)));
         } catch (Throwable e) {
@@ -501,7 +532,7 @@ public class SolverWorker {
 
     public void onShutdown(@Observes ShutdownEvent event) {
         this.shuttingDown.set(true);
-        var id = System.getenv(EnvironmentVars.ENV_TIMEFOLD_JOB_ID);
+        var id = getOrNull(EnvironmentVars.ENV_TIMEFOLD_JOB_ID);
         if (id != null) {
 
             try {
@@ -602,14 +633,14 @@ public class SolverWorker {
                 metadata.solvingStarted();
                 storageService.storeMetadata(id, metadata);
                 processor.onNext(metadata);
-                sendEvent(scheduleStartedEmitter, new ItemStarted(metadata, solverModel, planName, tenantName));
+                sendEvent(scheduleStartedEmitter, new ItemStarted(metadata, solverModel, planName(), tenantName()));
             }
             if (metadata.getSolverStatus() == SolvingStatus.SOLVING_STARTED) {
                 metadata.solvingActive();
                 storageService.storeMetadata(id, metadata);
                 processor.onNext(metadata);
                 // Re-sending item started with new ACTIVE status to reflect stored status, planName, tenantName
-                sendEvent(scheduleStartedEmitter, new ItemStarted(metadata, solverModel, planName, tenantName));
+                sendEvent(scheduleStartedEmitter, new ItemStarted(metadata, solverModel, planName(), tenantName()));
             }
             solutionManager.update(solverModel);
             return solverModel;
@@ -663,7 +694,7 @@ public class SolverWorker {
             saveIntermediateSolution(id, () -> storageService.updateSolution(id, modelOutput, metadata,
                     extractInputMetrics(solverModel), extractOutputMetrics(solverModel)));
             sendEvent(initSolutionEmitter, new InitSolutionEvent(metadata, solverModel,
-                    SolverWorkerJobState.ofRunning(SolverStatus.SOLVING_ACTIVE, solverJob), planName, tenantName,
+                    SolverWorkerJobState.ofRunning(SolverStatus.SOLVING_ACTIVE, solverJob), planName(), tenantName(),
                     eventProducerId.producerId()));
         }
     }
@@ -681,7 +712,7 @@ public class SolverWorker {
                     extractInputMetrics(solverModel), extractOutputMetrics(solverModel)));
 
             sendEvent(bestSolutionEmitter, new BestSolutionEvent(metadata, solverModel,
-                    SolverWorkerJobState.ofRunning(SolverStatus.SOLVING_ACTIVE, solverJob), planName, tenantName,
+                    SolverWorkerJobState.ofRunning(SolverStatus.SOLVING_ACTIVE, solverJob), planName(), tenantName(),
                     eventProducerId.producerId()));
         }
     }
@@ -759,7 +790,8 @@ public class SolverWorker {
             LOGGER.info(SolverRunSummaryMessage.of(id, solverModel.getScore(), runSummary));
             processor.onNext(metadata);
             sendEvent(finalSolutionEmitter, new FinalBestSolutionEvent(metadata, solverModel,
-                    SolverWorkerJobState.ofTerminated(SolverStatus.NOT_SOLVING, solverJob, runSummary), planName, tenantName));
+                    SolverWorkerJobState.ofTerminated(SolverStatus.NOT_SOLVING, solverJob, runSummary), planName(),
+                    tenantName()));
 
             postProcessCompleteOutput(id, modelOutput, solverModel);
 
@@ -821,7 +853,7 @@ public class SolverWorker {
             storageService.storeMetadata(problemId, metadata);
 
             processor.onNext(metadata);
-            sendEvent(failedSolutionEmitter, new FailedSolutionEvent(metadata, solverJob, throwable, planName, tenantName));
+            sendEvent(failedSolutionEmitter, new FailedSolutionEvent(metadata, solverJob, throwable, planName(), tenantName()));
         } finally {
 
             for (var processor : modelPostProcessors) {
@@ -843,7 +875,7 @@ public class SolverWorker {
             }
 
             try {
-                sendEvent(scheduleFailedEmitter, new ItemFailed(metadata, throwable, planName, tenantName));
+                sendEvent(scheduleFailedEmitter, new ItemFailed(metadata, throwable, planName(), tenantName()));
             } finally {
                 completionStatus.completed(problemId);
                 // shutdown has to be executed last to ensure everything executed before pod shuts down

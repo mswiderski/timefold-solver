@@ -65,7 +65,7 @@ class ReplayEnrichmentTest {
 
     private static MapService produce(Optional<String> replayDirectory) {
         // Only the replay path is exercised, so the remote client and its dependencies are not needed.
-        return new MapServiceProducer(true, null, null, null, List.of(), false, false, Optional.empty(),
+        return new MapServiceProducer(true, null, null, null, List.of(), false, carOptions(), Optional.empty(),
                 new SingleTimeframeBucketing(), null, new ObjectMapper(), false, true, replayDirectory)
                 .mapServiceProducer();
     }

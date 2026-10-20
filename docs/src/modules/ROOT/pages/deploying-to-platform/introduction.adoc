@@ -34,6 +34,10 @@ Since deploying to the platform requires building your model with the Enterprise
 === Hosting and orchestration
 
 * *Hosting and scaling*: the platform builds, stores, and runs the container image, scaling it to the number of concurrent solve requests, so you're not managing a Kubernetes deployment or a fleet of containers.
+* *Pod pool*: for on-demand requests, such as score analysis and recommendations, the platform can keep idle containers of your model ready and claim one, instead of starting a new container for each request.
+A claimed container gets the settings of the tenant and the run after it has started.
+The SDK applies these settings for you, so your model needs no changes.
+If your own code keeps a platform setting, such as the tenant, read it from the configuration when you use it, not once at startup.
 * *Compliance*: the platform is ISO and SOC certified, so you don't have to pursue and maintain those certifications yourself for your model's hosting.
 See https://trust.timefold.ai/[trust.timefold.ai] for details.
 * *A multi-tenant REST gateway*: consumers of your model authenticate with API keys scoped to a tenant, so authentication, rate limiting, and per-customer isolation come built in.

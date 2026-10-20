@@ -1,5 +1,7 @@
 package ai.timefold.solver.service.worker.impl;
 
+import static ai.timefold.solver.service.definition.internal.platform.PlatformEnvironment.getOrNull;
+
 import java.time.Duration;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,13 +27,13 @@ public class ShutdownOnTerminate {
 
     public void process(String id) {
 
-        if (System.getenv(EnvironmentVars.ENV_TIMEFOLD_JOB_ID) != null) {
+        if (getOrNull(EnvironmentVars.ENV_TIMEFOLD_JOB_ID) != null) {
             shutDownOrSchedule(id, 0);
         }
     }
 
     public void processFailed(String id, Throwable error) {
-        if (System.getenv(EnvironmentVars.ENV_TIMEFOLD_JOB_ID) != null) {
+        if (getOrNull(EnvironmentVars.ENV_TIMEFOLD_JOB_ID) != null) {
             LOGGER.error("Solving with id ({}) failed: message ({}), shutting down", id,
                     error.getMessage(), error.getCause());
             shutDownOrSchedule(id, determineStatusBasedOnException(error));
@@ -39,7 +41,7 @@ public class ShutdownOnTerminate {
     }
 
     private void shutDownOrSchedule(String id, int status) {
-        String delayDurationEnv = System.getenv(EnvironmentVars.ENV_TIMEFOLD_RUNTIME_TTL);
+        String delayDurationEnv = getOrNull(EnvironmentVars.ENV_TIMEFOLD_RUNTIME_TTL);
         if (delayDurationEnv == null) {
 
             LOGGER.info("Execution ended ({}), shutting down directly with status {}", id, status);

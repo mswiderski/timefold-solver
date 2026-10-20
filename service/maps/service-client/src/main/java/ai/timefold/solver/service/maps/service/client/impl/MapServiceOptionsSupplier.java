@@ -6,46 +6,100 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
+import jakarta.enterprise.event.Reception;
+import jakarta.inject.Inject;
 
+import ai.timefold.solver.service.definition.internal.platform.PlatformEnvironment;
+import ai.timefold.solver.service.definition.internal.platform.PodPoolClaimed;
 import ai.timefold.solver.service.maps.api.model.TransportType;
 import ai.timefold.solver.service.maps.service.integration.internal.MapServiceOptions;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+/**
+ * Supplies the map service options from the configuration.
+ * <p>
+ * A pod pool claim can set the options after startup; the supplier then reads them again.
+ */
 @ApplicationScoped
 public class MapServiceOptionsSupplier {
 
-    private final Optional<String> provider;
+    static final String PROVIDER_PROPERTY = "timefold.platform.map-service.provider";
+    static final String LOCATION_PROPERTY = "timefold.platform.map-service.location";
+    static final String MAX_DISTANCE_FROM_ROAD_PROPERTY = "timefold.platform.map-service.max-distance-from-road";
+    static final String MODEL_PROPERTY = "timefold.model.id";
+    static final String MODEL_VERSION_PROPERTY = "timefold.model.api-version";
+    static final String MODEL_RESOURCE_PROPERTY = "timefold.model.rest-resource";
+    static final String TENANT_ID_PROPERTY = "timefold.platform.tenant-id";
+    static final String TRANSPORT_TYPE_PROPERTY = "timefold.platform.map-service.transport-type";
+    static final String ALLOWED_TRANSPORT_TYPES_PROPERTY = "timefold.platform.map-service.allowed-transport-types";
+    public static final String USE_TRAFFIC_PROPERTY = "timefold.platform.map-service.use-traffic";
 
-    private final Optional<String> location;
+    private volatile Optional<String> provider;
 
-    private final Optional<String> model;
+    private volatile Optional<String> location;
 
-    private final Optional<String> modelVersion;
+    private volatile Optional<String> model;
 
-    private final Optional<String> modelResource;
+    private volatile Optional<String> modelVersion;
 
-    private final Optional<String> tenantId;
+    private volatile Optional<String> modelResource;
 
-    private final Optional<Double> maxDistanceFromRoad;
+    private volatile Optional<String> tenantId;
 
-    private final TransportType transportType;
+    private volatile Optional<Double> maxDistanceFromRoad;
 
-    private final List<TransportType> allowedTransportTypes;
+    private volatile TransportType transportType;
+
+    private volatile List<TransportType> allowedTransportTypes;
+
+    private volatile boolean useTraffic;
+
+    @Inject
+    public MapServiceOptionsSupplier(
+            @ConfigProperty(name = PROVIDER_PROPERTY) Optional<String> provider,
+            @ConfigProperty(name = LOCATION_PROPERTY) Optional<String> location,
+            @ConfigProperty(name = MAX_DISTANCE_FROM_ROAD_PROPERTY) Optional<Double> maxDistanceFromRoad,
+            @ConfigProperty(name = MODEL_PROPERTY) Optional<String> model,
+            @ConfigProperty(name = MODEL_VERSION_PROPERTY) Optional<String> modelVersion,
+            @ConfigProperty(name = MODEL_RESOURCE_PROPERTY) Optional<String> modelResource,
+            @ConfigProperty(name = TENANT_ID_PROPERTY) Optional<String> tenantId,
+            @ConfigProperty(name = TRANSPORT_TYPE_PROPERTY) Optional<String> transportType,
+            @ConfigProperty(name = ALLOWED_TRANSPORT_TYPES_PROPERTY) Optional<String> allowedTransportTypes,
+            @ConfigProperty(name = USE_TRAFFIC_PROPERTY) Optional<Boolean> useTraffic) {
+        apply(provider, location, maxDistanceFromRoad, model, modelVersion, modelResource, tenantId, transportType,
+                allowedTransportTypes, useTraffic);
+    }
 
     public MapServiceOptionsSupplier(
-            @ConfigProperty(name = "timefold.platform.map-service.provider") Optional<String> provider,
-            @ConfigProperty(name = "timefold.platform.map-service.location") Optional<String> location,
-            @ConfigProperty(
-                    name = "timefold.platform.map-service.max-distance-from-road") Optional<Double> maxDistanceFromRoad,
-            @ConfigProperty(name = "timefold.model.id") Optional<String> model,
-            @ConfigProperty(name = "timefold.model.api-version") Optional<String> modelVersion,
-            @ConfigProperty(name = "timefold.model.rest-resource") Optional<String> modelResource,
-            @ConfigProperty(name = "timefold.platform.tenant-id") Optional<String> tenantId,
-            @ConfigProperty(name = "timefold.platform.map-service.transport-type") Optional<String> transportType,
-            @ConfigProperty(
-                    name = "timefold.platform.map-service.allowed-transport-types") Optional<String> allowedTransportTypes) {
+            Optional<String> provider, Optional<String> location, Optional<Double> maxDistanceFromRoad,
+            Optional<String> model, Optional<String> modelVersion, Optional<String> modelResource,
+            Optional<String> tenantId, Optional<String> transportType, Optional<String> allowedTransportTypes) {
+        this(provider, location, maxDistanceFromRoad, model, modelVersion, modelResource, tenantId, transportType,
+                allowedTransportTypes, Optional.empty());
+    }
+
+    void onPodPoolClaimed(
+            @Observes(notifyObserver = Reception.IF_EXISTS) @Priority(PodPoolClaimed.REFRESH_PRIORITY) PodPoolClaimed event) {
+        apply(PlatformEnvironment.get(PROVIDER_PROPERTY),
+                PlatformEnvironment.get(LOCATION_PROPERTY),
+                PlatformEnvironment.get(MAX_DISTANCE_FROM_ROAD_PROPERTY, Double.class),
+                PlatformEnvironment.get(MODEL_PROPERTY),
+                PlatformEnvironment.get(MODEL_VERSION_PROPERTY),
+                PlatformEnvironment.get(MODEL_RESOURCE_PROPERTY),
+                PlatformEnvironment.get(TENANT_ID_PROPERTY),
+                PlatformEnvironment.get(TRANSPORT_TYPE_PROPERTY),
+                PlatformEnvironment.get(ALLOWED_TRANSPORT_TYPES_PROPERTY),
+                PlatformEnvironment.get(USE_TRAFFIC_PROPERTY, Boolean.class));
+    }
+
+    private synchronized void apply(Optional<String> provider, Optional<String> location,
+            Optional<Double> maxDistanceFromRoad, Optional<String> model, Optional<String> modelVersion,
+            Optional<String> modelResource, Optional<String> tenantId, Optional<String> transportType,
+            Optional<String> allowedTransportTypes, Optional<Boolean> useTraffic) {
         this.provider = provider;
         this.location = location;
         this.model = model;
@@ -55,6 +109,11 @@ public class MapServiceOptionsSupplier {
         this.maxDistanceFromRoad = maxDistanceFromRoad;
         this.transportType = resolveTransportType(transportType);
         this.allowedTransportTypes = resolveAllowedTransportTypes(allowedTransportTypes);
+        this.useTraffic = useTraffic.orElse(false);
+    }
+
+    public boolean isUseTraffic() {
+        return useTraffic;
     }
 
     public TransportType getTransportType() {
